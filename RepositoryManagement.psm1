@@ -139,8 +139,192 @@ function Show-CurrentBranches {
     }
 }
 
+# Function to show git status for all repos
+function Show-AllStatus {
+    Write-Host "GIT STATUS OVERVIEW" -BackgroundColor DarkBlue -ForegroundColor White
+    Write-Host ""
+    
+    foreach ($repo in $script:repos) {
+        Set-Location $repo.FullName
+        $status = git status --porcelain
+        $branch = git rev-parse --abbrev-ref HEAD
+        
+        Write-Host "📁 $($repo.Name)" -ForegroundColor Yellow
+        Write-Host "   Branch: $branch" -ForegroundColor Cyan
+        
+        if ($status) {
+            $status | ForEach-Object {
+                $statusCode = $_.Substring(0, 2)
+                $file = $_.Substring(3)
+                $color = switch ($statusCode.Trim()) {
+                    "M" { "Yellow" }     # Modified
+                    "A" { "Green" }      # Added
+                    "D" { "Red" }        # Deleted
+                    "??" { "Gray" }      # Untracked
+                    default { "White" }
+                }
+                Write-Host "   $statusCode $file" -ForegroundColor $color
+            }
+        }
+        else {
+            Write-Host "   ✅ Clean working directory" -ForegroundColor Green
+        }
+        Write-Host ""
+    }
+    Set-Location $script:mainRepo
+}
+
+# Function to stash changes in all repos
+function Stash-AllRepos {
+    param([string]$Message = "Auto-stash from PowerShell")
+    
+    Write-Host "Stashing changes in all repositories..." -ForegroundColor Yellow
+    foreach ($repo in $script:repos) {
+        Set-Location $repo.FullName
+        $status = git status --porcelain
+        if ($status) {
+            Write-Host "Stashing changes in $($repo.Name)..." -ForegroundColor Cyan
+            git stash push -m $Message
+        }
+        else {
+            Write-Host "$($repo.Name): No changes to stash" -ForegroundColor Green
+        }
+    }
+    Set-Location $script:mainRepo
+}
+
+# Function to pop stashed changes in all repos
+function Pop-AllStashes {
+    Write-Host "Popping stashes in all repositories..." -ForegroundColor Yellow
+    foreach ($repo in $script:repos) {
+        Set-Location $repo.FullName
+        $stashList = git stash list
+        if ($stashList) {
+            Write-Host "Popping stash in $($repo.Name)..." -ForegroundColor Cyan
+            git stash pop
+        }
+        else {
+            Write-Host "$($repo.Name): No stashes to pop" -ForegroundColor Green
+        }
+    }
+    Set-Location $script:mainRepo
+}
+
+# Function to switch branch in all repos
+function Switch-AllBranches {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BranchName
+    )
+    
+    Write-Host "Switching to branch '$BranchName' in all repositories..." -ForegroundColor Yellow
+    foreach ($repo in $script:repos) {
+        Set-Location $repo.FullName
+        Write-Host "Switching branch in $($repo.Name)..." -ForegroundColor Cyan
+        
+        # Check if branch exists locally
+        $localBranch = git branch --list $BranchName
+        if ($localBranch) {
+            git checkout $BranchName
+        }
+        else {
+            # Try to checkout from remote
+            git checkout -b $BranchName origin/$BranchName 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Branch '$BranchName' not found in $($repo.Name)"
+            }
+        }
+    }
+    Set-Location $script:mainRepo
+    Show-CurrentBranches
+}
+
+# Function to run a git command in all repos
+function Invoke-GitInAllRepos {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$GitCommand
+    )
+    
+    Write-Host "Running 'git $GitCommand' in all repositories..." -ForegroundColor Yellow
+    foreach ($repo in $script:repos) {
+        Set-Location $repo.FullName
+        Write-Host "📁 $($repo.Name):" -ForegroundColor Cyan
+        Invoke-Expression "git $GitCommand"
+        Write-Host ""
+    }
+    Set-Location $script:mainRepo
+}
+
+# Function to show last commit in each repo
+function Show-LastCommits {
+    Write-Host "LAST COMMITS" -BackgroundColor DarkGreen -ForegroundColor White
+    Write-Host ""
+    
+    foreach ($repo in $script:repos) {
+        Set-Location $repo.FullName
+        $lastCommit = git log -1 --pretty=format:"%h - %an, %ar : %s"
+        Write-Host "📁 $($repo.Name)" -ForegroundColor Yellow
+        Write-Host "   $lastCommit" -ForegroundColor White
+        Write-Host ""
+    }
+    Set-Location $script:mainRepo
+}
+
+# Function to open all repos in VS Code
+function Open-AllInVSCode {
+    foreach ($repo in $script:repos) {
+        Write-Host "Opening $($repo.Name) in VS Code..." -ForegroundColor Cyan
+        code $repo.FullName
+    }
+}
+
+# Function to check for uncommitted changes across all repos
+function Test-HasUncommittedChanges {
+    $hasChanges = $false
+    Write-Host "CHECKING FOR UNCOMMITTED CHANGES" -BackgroundColor DarkRed -ForegroundColor White
+    Write-Host ""
+    
+    foreach ($repo in $script:repos) {
+        Set-Location $repo.FullName
+        $status = git status --porcelain
+        if ($status) {
+            $hasChanges = $true
+            Write-Host "⚠️  $($repo.Name) has uncommitted changes" -ForegroundColor Red
+        }
+        else {
+            Write-Host "✅ $($repo.Name) is clean" -ForegroundColor Green
+        }
+    }
+
+    Set-Location $script:mainRepo
+    return $hasChanges
+}
+
+# Function to create and switch to a new branch in all repos
+function New-BranchInAllRepos {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$BranchName
+    )
+    
+    Write-Host "Creating and switching to branch '$BranchName' in all repositories..." -ForegroundColor Yellow
+    foreach ($repo in $script:repos) {
+        Set-Location $repo.FullName
+        Write-Host "Creating branch in $($repo.Name)..." -ForegroundColor Cyan
+        git checkout -b $BranchName
+    }
+    Set-Location $script:mainRepo
+    Show-CurrentBranches
+}
+
+# Quick aliases for common operations
+function gsa { Show-AllStatus }
+function gsc { Show-CurrentBranches }
+function glc { Show-LastCommits }
+
 function up { 
     Set-Location D:\ && docker compose up -d && Set-Location $script:mainRepo && wt -w 0 split-pane -- pwsh.exe -NoExit -Command Show-CurrentBranches && pnpm dev 
 }
 
-Export-ModuleMember -Function Test-IfOnMainBranch, Update-All-Repos, Update-Repo, Show-CurrentBranches, up
+Export-ModuleMember -Function Test-IfOnMainBranch, Update-All-Repos, Update-Repo, Show-CurrentBranches, Show-AllStatus, Stash-AllRepos, Pop-AllStashes, Switch-AllBranches, Invoke-GitInAllRepos, Show-LastCommits, Open-AllInVSCode, Test-HasUncommittedChanges, New-BranchInAllRepos, gsa, gsc, glc, up
